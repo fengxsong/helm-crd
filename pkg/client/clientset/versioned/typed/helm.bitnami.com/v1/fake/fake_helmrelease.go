@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package fake
 
 import (
 	helm_bitnami_com_v1 "github.com/fengxsong/helm-crd/pkg/apis/helm.bitnami.com/v1"
-	autoscaling_v1 "k8s.io/api/autoscaling/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -138,26 +137,4 @@ func (c *FakeHelmReleases) Patch(name string, pt types.PatchType, data []byte, s
 		return nil, err
 	}
 	return obj.(*helm_bitnami_com_v1.HelmRelease), err
-}
-
-// GetScale takes name of the helmRelease, and returns the corresponding scale object, and an error if there is any.
-func (c *FakeHelmReleases) GetScale(helmReleaseName string, options v1.GetOptions) (result *autoscaling_v1.Scale, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewGetSubresourceAction(helmreleasesResource, c.ns, "scale", helmReleaseName), &autoscaling_v1.Scale{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*autoscaling_v1.Scale), err
-}
-
-// UpdateScale takes the representation of a scale and updates it. Returns the server's representation of the scale, and an error, if there is any.
-func (c *FakeHelmReleases) UpdateScale(helmReleaseName string, scale *autoscaling_v1.Scale) (result *autoscaling_v1.Scale, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(helmreleasesResource, "scale", c.ns, scale), &autoscaling_v1.Scale{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*autoscaling_v1.Scale), err
 }

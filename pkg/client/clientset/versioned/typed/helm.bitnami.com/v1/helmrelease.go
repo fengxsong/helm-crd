@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ package v1
 import (
 	v1 "github.com/fengxsong/helm-crd/pkg/apis/helm.bitnami.com/v1"
 	scheme "github.com/fengxsong/helm-crd/pkg/client/clientset/versioned/scheme"
-	autoscaling_v1 "k8s.io/api/autoscaling/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -45,9 +44,6 @@ type HelmReleaseInterface interface {
 	List(opts meta_v1.ListOptions) (*v1.HelmReleaseList, error)
 	Watch(opts meta_v1.ListOptions) (watch.Interface, error)
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.HelmRelease, err error)
-	GetScale(helmReleaseName string, options meta_v1.GetOptions) (*autoscaling_v1.Scale, error)
-	UpdateScale(helmReleaseName string, scale *autoscaling_v1.Scale) (*autoscaling_v1.Scale, error)
-
 	HelmReleaseExpansion
 }
 
@@ -172,34 +168,6 @@ func (c *helmReleases) Patch(name string, pt types.PatchType, data []byte, subre
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
-		Into(result)
-	return
-}
-
-// GetScale takes name of the helmRelease, and returns the corresponding autoscaling_v1.Scale object, and an error if there is any.
-func (c *helmReleases) GetScale(helmReleaseName string, options meta_v1.GetOptions) (result *autoscaling_v1.Scale, err error) {
-	result = &autoscaling_v1.Scale{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("helmreleases").
-		Name(helmReleaseName).
-		SubResource("scale").
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
-		Into(result)
-	return
-}
-
-// UpdateScale takes the top resource name and the representation of a scale and updates it. Returns the server's representation of the scale, and an error, if there is any.
-func (c *helmReleases) UpdateScale(helmReleaseName string, scale *autoscaling_v1.Scale) (result *autoscaling_v1.Scale, err error) {
-	result = &autoscaling_v1.Scale{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("helmreleases").
-		Name(helmReleaseName).
-		SubResource("scale").
-		Body(scale).
 		Do().
 		Into(result)
 	return
