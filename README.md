@@ -4,7 +4,7 @@
 
 ## Changes
 
-- upgrade tiller to v2.8.2 and all import dependencies
+- upgrade tiller to v2.9.0+ and all import dependencies
 - auto create HelmRelease CRD if not exists before start controller
 - add .status and some other properties
 - fix duplicate update issues
