@@ -1,0 +1,45 @@
+consumes:
+- application/json
+info:
+  description: HelmRelease crd controller from goswagger.io
+  title: HelmRelease Controller
+  version: 1.0.0
+paths: {}
+produces:
+- application/json
+schemes:
+- http
+swagger: "2.0"
+definitions:
+  helmrelease:
+    type: object
+    required:
+      - repoURL
+      - chartName
+      - version
+      - values
+    properties:
+      repoURL:
+        type: string
+        minLength: 1
+      chartName:
+        type: string
+        minLength: 1
+      version:
+        type: string
+        minLength: 1
+      username:
+        type: string
+      password:
+        type: string
+      values:
+        type: string
+        minLength: 1    
+      force:
+        type: boolean
+      recreate:
+        type: boolean
+      paused:
+        type: boolean
+      description:
+        type: string

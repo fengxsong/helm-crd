@@ -1,19 +1,15 @@
-package main
+package controller
 
 import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
-	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	extclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -26,31 +22,47 @@ import (
 	"k8s.io/helm/pkg/proto/hapi/release"
 	"k8s.io/helm/pkg/repo"
 
-	helmcrdv1 "github.com/fengxsong/helm-crd/pkg/apis/helm.bitnami.com/v1"
-	helmClientset "github.com/fengxsong/helm-crd/pkg/client/clientset/versioned"
+	"github.com/fengxsong/helm-crd/pkg/apis/helm.bitnami.com/v1"
+	"github.com/fengxsong/helm-crd/pkg/client/clientset/versioned"
 	informers "github.com/fengxsong/helm-crd/pkg/client/informers/externalversions"
 )
 
 const (
 	controllerName = "HelmReleases-controller"
-	defaultRepoURL = "https://kubernetes-charts.storage.googleapis.com"
 	maxRetries     = 5
 )
 
+// Controller is a cache.Controller for acting on Helm CRD objects
 type Controller struct {
 	kubeClientset kubernetes.Interface
-	clientset     helmClientset.Interface
+	clientset     versioned.Interface
 	helmClient    *helm.Client
 	informer      cache.SharedIndexInformer
 	queue         workqueue.RateLimitingInterface
 }
 
-func NewController(
-	kubeClientset kubernetes.Interface,
-	clientset helmClientset.Interface,
-	crdInformersFactory informers.SharedInformerFactory) *Controller {
+// NewController creates a Controller
+func NewController() (*Controller, error) {
+	kubeClientset, err := kubernetes.NewForConfig(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
 
-	crdInformer := crdInformersFactory.Helm().V1().HelmReleases()
+	clientset, err := versioned.NewForConfig(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+
+	extClientset, err := extclientset.NewForConfig(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = ensureCustomResource(extClientset); err != nil {
+		return nil, err
+	}
+
+	crdInformersFactory := informers.NewSharedInformerFactory(clientset, time.Second*time.Duration(resyncDuration))
 
 	glog.Infof("Using tiller host: %s", settings.TillerHost)
 
@@ -58,7 +70,7 @@ func NewController(
 		kubeClientset: kubeClientset,
 		clientset:     clientset,
 		helmClient:    helm.NewClient(helm.Host(settings.TillerHost), helm.ConnectTimeout(5)),
-		informer:      crdInformer.Informer(),
+		informer:      crdInformersFactory.Helm().V1().HelmReleases().Informer(),
 		queue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), ""),
 	}
 
@@ -68,81 +80,7 @@ func NewController(
 		DeleteFunc: c.onDeleteFunc,
 	})
 
-	return c
-}
-
-func ensureResource(extClient extclientset.Interface) error {
-	crd := &apiextensions.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "helmreleases." + helmcrdv1.SchemeGroupVersion.Group,
-		},
-		Spec: apiextensions.CustomResourceDefinitionSpec{
-			Group:   helmcrdv1.SchemeGroupVersion.Group,
-			Version: helmcrdv1.SchemeGroupVersion.Version,
-			Scope:   apiextensions.NamespaceScoped,
-			Names: apiextensions.CustomResourceDefinitionNames{
-				Plural:     "helmreleases",
-				Singular:   "helmrelease",
-				Kind:       "HelmRelease",
-				ListKind:   "HelmReleaseList",
-				ShortNames: []string{"hrl"},
-			},
-		},
-	}
-	_, err := extClient.ApiextensionsV1beta1().CustomResourceDefinitions().Create(crd)
-	if apierrors.IsAlreadyExists(err) {
-		glog.Info("Skip the creation for CustomResourceDefinition HelmReleases because it has already been created")
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	glog.Info("Create CustomResourceDefinition HelmReleases successfully")
-	return nil
-}
-
-func (c *Controller) onAddFunc(obj interface{}) {
-	glog.V(2).Info("onAddFunc is invoked.")
-	hr := obj.(*helmcrdv1.HelmRelease)
-	switch hr.Status.Phase {
-	case helmcrdv1.HelmRealeasePhaseUnknown, helmcrdv1.HelmRealeasePhaseNew:
-	default:
-		glog.Infof("HelmRelease %s/%s is not new, skipping (phase=%q)", hr.Namespace, hr.Name, hr.Status.Phase)
-		return
-	}
-	key, err := cache.MetaNamespaceKeyFunc(obj)
-	if err == nil {
-		c.queue.Add(key)
-	}
-}
-
-func (c *Controller) onUpdateFunc(oldObj, newObj interface{}) {
-	glog.V(2).Info("onUpdateFunc is invoked.")
-	old := oldObj.(*helmcrdv1.HelmRelease)
-	new := newObj.(*helmcrdv1.HelmRelease)
-	if old.ResourceVersion == new.ResourceVersion {
-		return
-	}
-	// TODO: deal with failure?
-	if new.Status.Phase == helmcrdv1.HelmRealeasePhaseFailed {
-		glog.Infof("Skipping helmrelease %s (phase=%q)", new.Name, new.Status.Phase)
-		return
-	}
-	if reflect.DeepEqual(new.Spec, old.Spec) && new.Status.Phase == helmcrdv1.HelmRealeasePhaseReady {
-		return
-	}
-	key, err := cache.MetaNamespaceKeyFunc(newObj)
-	if err == nil {
-		c.queue.Add(key)
-	}
-}
-
-func (c *Controller) onDeleteFunc(obj interface{}) {
-	glog.V(2).Info("onDeleteFunc is invoked.")
-	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-	if err == nil {
-		c.queue.Add(key)
-	}
+	return c, nil
 }
 
 // HasSynced returns true once this controller has completed an
@@ -166,6 +104,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	defer runtime.HandleCrash()
 	defer c.queue.ShutDown()
 
+	go c.informer.Run(stopCh)
 	// Start the informer factories to begin populating the informer caches
 	glog.Infof("Starting %s", controllerName)
 
@@ -214,6 +153,9 @@ func (c *Controller) processNextItem() bool {
 	} else {
 		glog.Errorf("Error updating %s, giving up: %v", key, err)
 		c.queue.Forget(key)
+		if err, ok := err.(*wrapError); ok {
+			c.handleWrapError(err)
+		}
 		runtime.HandleError(err)
 	}
 	return true
@@ -250,7 +192,8 @@ func (c *Controller) updateRelease(key string) error {
 		}
 		return nil
 	}
-	helmObj := obj.(*helmcrdv1.HelmRelease)
+
+	helmObj := obj.(*v1.HelmRelease)
 	if helmObj.Spec.Paused {
 		glog.Infof("HelmRelease %s is not yet process", helmObj.Name)
 		return nil
@@ -268,28 +211,28 @@ func (c *Controller) updateRelease(key string) error {
 
 	repoURL := helmObj.Spec.RepoURL
 	if repoURL == "" {
-		// FIXME: Make configurable
 		repoURL = defaultRepoURL
 	}
 
+	// FIXME: Make configurable
 	certFile := ""
 	keyFile := ""
 	caFile := ""
-	chartURL, err := repo.FindChartInRepoURL(repoURL, helmObj.Spec.ChartName, helmObj.Spec.Version, certFile, keyFile, caFile, getter.All(settings))
+	chartURL, err := repo.FindChartInAuthRepoURL(repoURL, helmObj.Spec.Username, helmObj.Spec.Password, helmObj.Spec.ChartName, helmObj.Spec.Version, certFile, keyFile, caFile, getter.All(settings))
 	if err != nil {
-		return err
+		return &wrapError{helmObj, err}
 	}
 
 	glog.Infof("Downloading %s ...", chartURL)
 	fname, _, err := dl.DownloadTo(chartURL, helmObj.Spec.Version, settings.Home.Archive())
 	if err != nil {
-		return err
+		return &wrapError{helmObj, err}
 	}
 	glog.Infof("Downloaded %s to %s", chartURL, fname)
 	chartRequested, err := chartutil.LoadFile(fname) // fixme: just download to ram buf
 	if err != nil {
 		glog.Errorf("Error loading chart file: %v", err)
-		return err
+		return &wrapError{helmObj, err}
 	}
 
 	rlsName := releaseName(helmObj.Namespace, helmObj.Name)
@@ -299,17 +242,17 @@ func (c *Controller) updateRelease(key string) error {
 	if err != nil {
 		if !isNotFound(err) {
 			glog.Errorf("Error getting release history: %v", err)
-			return err
+			return &wrapError{helmObj, err}
 		}
 		glog.Infof("Installing release %s into namespace %s", rlsName, helmObj.Namespace)
 		res, err := c.helmClient.InstallReleaseFromChart(
 			chartRequested,
 			helmObj.Namespace,
-			helm.ValueOverrides([]byte(helmObj.Spec.Values)),
+			helm.ValueOverrides([]byte(helmObj.Spec.RawValues)),
 			helm.ReleaseName(rlsName),
 		)
 		if err != nil {
-			return err
+			return &wrapError{helmObj, err}
 		}
 		rel = res.GetRelease()
 	} else {
@@ -318,12 +261,12 @@ func (c *Controller) updateRelease(key string) error {
 		res, err := c.helmClient.UpdateReleaseFromChart(
 			rlsName,
 			chartRequested,
-			helm.UpdateValueOverrides([]byte(helmObj.Spec.Values)),
+			helm.UpdateValueOverrides([]byte(helmObj.Spec.RawValues)),
 			helm.UpgradeForce(helmObj.Spec.Force),
 			helm.UpgradeRecreate(helmObj.Spec.Recreate),
 		)
 		if err != nil {
-			return err
+			return &wrapError{helmObj, err}
 		}
 		rel = res.GetRelease()
 	}
@@ -335,13 +278,12 @@ func (c *Controller) updateRelease(key string) error {
 		glog.Warningf("Unable to fetch release status for %s: %v", rel.Name, err)
 	}
 	helmObjCopy := helmObj.DeepCopy()
-	// Is it necessary to do this?
-	helmObjCopy.Status.Config = rel.GetChart().GetValues().GetRaw()
 
+	helmObjCopy.Status.ChartURL = chartURL
 	helmObjCopy.Status.Revision = rel.GetVersion()
-	helmObjCopy.Status.Phase = helmcrdv1.HelmRealeasePhaseReady
+	helmObjCopy.Status.Phase = v1.HelmRealeasePhaseReady
 	if _, err := c.clientset.HelmV1().HelmReleases(helmObjCopy.Namespace).Update(helmObjCopy); err != nil {
-		return err
+		return &wrapError{helmObj, err}
 	}
 	return nil
 }

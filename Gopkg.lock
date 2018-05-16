@@ -406,8 +406,8 @@
     "pkg/urlutil",
     "pkg/version"
   ]
-  revision = "a80231648a1473929271764b920a8e346f6de844"
-  version = "v2.8.2"
+  revision = ""
+  version = "v2.9.0"
 
 [solve-meta]
   analyzer-name = "dep"

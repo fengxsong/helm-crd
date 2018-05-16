@@ -19,14 +19,17 @@ type HelmRelease struct {
 // HelmReleaseSpec is the spec for a HelmRelease resource.
 type HelmReleaseSpec struct {
 	// RepoURL is the URL of the repository. Defaults to stable repo.
-	RepoURL string `json:"repoUrl,omitempty"`
+	RepoURL string `json:"repoURL,omitempty"`
 	// ChartName is the name of the chart within the repo
 	ChartName string `json:"chartName,omitempty"`
 	// Version is the chart version
 	Version string `json:"version,omitempty"`
-	// Values is a raw string containing extra Values added to the chart.
+	// Username/Password required if repository is private
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	// RawValues is a raw string containing extra Values added to the chart.
 	// These values override the default values inside of the chart.
-	Values string `json:"values,omitempty"`
+	RawValues string `json:"values,omitempty"`
 	// Force if set, force resource update through delete/recreate if needed
 	Force bool `json:"force,omitempty"`
 	// Recreate if set, performs pod restart during upgrade/rollback
@@ -44,8 +47,6 @@ type HelmRealeasePhase string
 const (
 	// HelmRealeasePhaseUnknown means that the helmrelease hasn't yet been processed.
 	HelmRealeasePhaseUnknown HelmRealeasePhase = ""
-	// HelmRealeasePhaseNew means that the helmrelease hasn't yet been processed.
-	HelmRealeasePhaseNew HelmRealeasePhase = "New"
 	// HelmRealeasePhaseReady means the helmrelease has install/upgrade successfully.
 	HelmRealeasePhaseReady HelmRealeasePhase = "Ready"
 	// HelmRealeasePhaseFailed means the helmrelease has terminated with an error.
@@ -54,27 +55,15 @@ const (
 
 // HelmReleaseStatus captures the current status of a HelmRelease.
 type HelmReleaseStatus struct {
-	// Default config for this chart.
-	Config string `json:"config,omitempty"`
-
-	// // Manifest is the string representation of the rendered template.
-	// Manifests string `json:"manifests,omitempty"`
-
+	// ChartURl is final download link of chart
+	ChartURL string `json:"chartUrl,omitempty"`
 	// Phase is current helmrelease life-cycle phase
 	Phase HelmRealeasePhase `json:"phase"`
 	// Revision is current helm chart release revision
 	Revision int32 `json:"revision,omitempty"`
+	// FailMsg is error message
+	FailMsg string `json:"failMsg,omitempty"`
 }
-
-// type HelmReleaseRollback struct {
-// 	metav1.TypeMeta   `json:",inline"`
-// 	metav1.ObjectMeta `json:"metadata,omitempty"`
-// }
-
-// type HelmReleaseRollbackSpec struct {
-// 	// RollbackVersion rollback to specified version
-// 	RollbackVersion int32 `json:"rollbackVersion,omitempty"`
-// }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
